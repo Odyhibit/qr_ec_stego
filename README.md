@@ -2,7 +2,7 @@
 
 Hide secret messages in QR codes using padding bytes and error correction codes. This tool demonstrates steganographic techniques where QR codes can carry hidden data while still scanning normally.
 
-## 🌟 Features
+## Features
 
 - **Dual Hiding Locations**: Hide data in padding bytes OR error correction codes (ECC)
 - **Maintains Functionality**: QR codes scan normally and display the decoy message
@@ -10,7 +10,7 @@ Hide secret messages in QR codes using padding bytes and error correction codes.
 - **Web Interface**: Browser-based tool for demos and visualization
 - **Python Tool**: Full-featured command-line interface for encoding/decoding
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Web Tool (Try it now!)
 
@@ -59,23 +59,23 @@ python padding_ecc_stego_v3_8bit.py decode stego_qr_ecc.png \
   --extract-ecc --k-per-block 8
 ```
 
-## 📚 How It Works
+## How It Works
 
 ### Method 1: Padding Bytes
 
 QR codes pad data to a fixed length. Normally this padding is filled with specific patterns, but we can insert our secret message here instead.
 
-- ✅ **Pros**: Simple, doesn't affect error correction
-- ⚠️ **Cons**: Limited capacity (depends on decoy message length)
+- **Pros**: Simple, doesn't affect error correction
+- **Cons**: Limited capacity (depends on decoy message length)
 
 ### Method 2: Error Correction Codes
 
 QR codes use Reed-Solomon error correction. We can replace some ECC bytes with our secret while maintaining enough error correction for the QR to still scan.
 
-- ✅ **Pros**: More capacity, works with any decoy length
-- ⚠️ **Cons**: Reduces error correction capability
+- **Pros**: More capacity, works with any decoy length
+- **Cons**: Reduces error correction capability
 
-## 🎮 CTF Challenges
+## CTF Challenges
 
 The `ctf_challenges/` folder contains ready-to-use challenges:
 
@@ -91,7 +91,7 @@ The `ctf_challenges/` folder contains ready-to-use challenges:
 
 See `ctf_challenges/README_ORGANIZER.md` for full documentation.
 
-## 🖥️ Project Structure
+## Project Structure
 
 ```
 qr_ec_stego/
@@ -111,7 +111,7 @@ qr_ec_stego/
     └── solution_manual.py             # Step-by-step educational solution
 ```
 
-## 🎯 Use Cases
+## Use Cases
 
 1. **Security Research**: Study steganography techniques
 2. **CTF Competitions**: Use included challenges or create your own
@@ -119,7 +119,7 @@ qr_ec_stego/
 4. **Demonstrations**: Web tool for visual explanations
 5. **Data Hiding**: Covert communication (educational purposes)
 
-## 🔧 Technical Details
+## Technical Details
 
 ### Requirements
 
@@ -135,7 +135,8 @@ qr_ec_stego/
 
 ### Supported QR Versions
 
-- Versions 1-40 (21×21 to 177×177 modules)
+- Versions 1-10 (21×21 to 57×57 modules)
+- Secret message max length 255 characters
 - All ECC levels (L, M, Q, H)
 - All mask patterns (0-7)
 
@@ -150,14 +151,14 @@ qr_ec_stego/
 - Version 5, ECC H, k=8: ~32 bytes available
 - More capacity with higher versions
 
-## 📖 Documentation
+## Documentation
 
 - **Python Tool**: Run `python padding_ecc_stego_v3_8bit.py --help`
 - **Web Tool**: See `docs/README.md`
 - **CTF Challenges**: See `ctf_challenges/README_ORGANIZER.md`
 - **Quick Reference**: See `ctf_challenges/QUICK_REFERENCE.md`
 
-## 🧪 Testing
+## Testing
 
 ```bash
 # Run CTF challenge solutions
@@ -167,7 +168,7 @@ python solution_challenge2.py
 python solution_manual.py
 ```
 
-## 🌐 Web Tool Details
+## Web Tool Details
 
 The web interface (`docs/`) provides:
 - ✅ QR code generation with custom parameters
@@ -176,7 +177,6 @@ The web interface (`docs/`) provides:
 - ✅ Visual comparison of two QR codes
 - ✅ Dark mode optimized design
 - ✅ Export analysis reports
-- ⚠️ Note: Steganography encoding still requires Python tool
 
 **New in latest update**: The JavaScript version can now extract hidden messages from QR codes! Try it with the built-in CTF challenge examples.
 
@@ -187,28 +187,29 @@ The web tool is designed for:
 - CTF challenge distribution
 - Quick QR code generation/decoding
 
-## 🚧 Limitations
+## Limitations
 
-1. **Web Tool Encoding**: JavaScript version can't encode steganography (use Python tool for creating QR codes with secrets)
+1. **Encoding**: Max Version 10, Max message length 255 (one byte length in header)
 2. **Web Tool Extraction**: Works well but may be less robust than Python with damaged images
 3. **Error Correction**: Compromising too many ECC bytes makes QR unscannable
 4. **Capacity**: Limited by QR version and decoy message length
 5. **Detection**: Statistical analysis could detect steganography
 
-## 🤝 Contributing
+## Contributing
 
 This is an educational and research project. Contributions welcome!
 
-## ⚖️ License
+## License
 
-This project is for educational and security research purposes. Use responsibly and ethically.
+MIT
+This project is for educational and security research purposes. Use responsibly and ethically. 
 
-## 🔗 Links
+## Links
 
 - **Live Demo**: [GitHub Pages](https://joshpbloom.github.io/qr_ec_stego/) (update when deployed)
 - **Repository**: [GitHub](https://github.com/joshpbloom/qr_ec_stego) (update with actual URL)
 
-## 🎓 Educational Notes
+## Educational Notes
 
 This tool demonstrates:
 - QR code internal structure
