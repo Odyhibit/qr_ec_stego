@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Format Bit Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .debug { background: #f0f0f0; padding: 10px; margin: 10px 0; }
+        canvas { border: 1px solid #ccc; }
+    </style>
+</head>
+<body>
+    <h1>QR Format Bit Reader Test</h1>
+
+    <input type="file" id="fileInput" accept="image/*">
+    <br><br>
+
+    <canvas id="canvas"></canvas>
+
+    <div id="output"></div>
+
+    <script src="js/qr-parser.js"></script>
+    <script>
+        document.getElementById('fileInput').addEventListener('change', function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(event) {
+                const img = new Image();
+                img.onload = function() {
+                    // Draw to canvas
+                    const canvas = document.getElementById('canvas');
+                    canvas.width = img.width;
+                    canvas.height = img.height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0);
+
+                    // Get image data
+                    const imageData = ctx.getImageData(0, 0, img.width, img.height);
+
+                    // Detect modules
+                    const modules = QRParser.detectModules(imageData);
+                    if (!modules) {
+                        document.getElementById('output').innerHTML = '<div class="debug">Failed to detect QR modules</div>';
+                        return;
+                    }
+
+                    const size = modules.length;
+                    let html = `<div class="debug">
+                        <strong>Module Grid:</strong> ${size}×${size}<br>
+                        Version: ${Math.floor((size - 17) / 4)}
+                    </div>`;
+
+                    // Show format bit locations
+                    html += '<div class="debug"><strong>Format Bits:</strong><br>';
+                    html += 'Row 8, Cols 0-5: ';
+                    for (let i = 0; i < 6; i++) {
+                        html += modules[8][i] ? '1' : '0';
+                    }
+                    html += '<br>';
+                    html += `Row 8, Col 7: ${modules[8][7] ? '1' : '0'}<br>`;
+                    html += `Row 8, Col 8: ${modules[8][8] ? '1' : '0'}<br>`;
+                    html += `Row 7, Col 8: ${modules[7][8] ? '1' : '0'}<br>`;
+                    html += 'Col 8, Rows 5-0: ';
+                    for (let i = 5; i >= 0; i--) {
+                        html += modules[i][8] ? '1' : '0';
+                    }
+                    html += '</div>';
+
+                    // Read and decode format
+                    const formatBits = [];
+                    for (let col = 0; col <= 5; col++) {
+                        formatBits.push(modules[8][col] ? 1 : 0);
+                    }
+                    formatBits.push(modules[8][7] ? 1 : 0);
+                    formatBits.push(modules[8][8] ? 1 : 0);
+                    formatBits.push(modules[7][8] ? 1 : 0);
+                    for (let row = 5; row >= 0; row--) {
+                        formatBits.push(modules[row][8] ? 1 : 0);
+                    }
+
+                    html += `<div class="debug">
+                        <strong>Format Bits Array:</strong> [${formatBits.join(', ')}]<br>
+                    `;
+
+                    // Convert to integer
+                    let formatInt = 0;
+                    for (let i = 0; i < 15; i++) {
+                        formatInt = (formatInt << 1) | formatBits[i];
+                    }
+                    html += `<strong>Format Integer:</strong> 0x${formatInt.toString(16).padStart(4, '0')} (${formatInt.toString(2).padStart(15, '0')})<br>`;
+
+                    // Remove mask
+                    formatInt ^= 0x5412;
+                    html += `<strong>After XOR 0x5412:</strong> 0x${formatInt.toString(16).padStart(4, '0')}<br>`;
+
+                    // Extract data bits
+                    const dataBits = (formatInt >> 10) & 0x1F;
+                    html += `<strong>Data bits:</strong> ${dataBits.toString(2).padStart(5, '0')}<br>`;
+
+                    const eccBits = (dataBits >> 3) & 0x03;
+                    const mask = dataBits & 0x07;
+                    const eccLevels = ['M', 'L', 'Q', 'H'];
+                    const eccLevel = eccLevels[eccBits];
+
+                    html += `<strong>ECC bits:</strong> ${eccBits.toString(2).padStart(2, '0')} = ${eccLevel}<br>`;
+                    html += `<strong>Mask:</strong> ${mask}<br>`;
+                    html += '</div>';
+
+                    html += `<div class="debug" style="background: ${eccLevel === 'H' && mask === 0 ? '#cfc' : '#fcc'}">
+                        <strong>Result:</strong> ECC=${eccLevel}, Mask=${mask}<br>
+                        Expected for challenge: ECC=H, Mask=0
+                    </div>`;
+
+                    document.getElementById('output').innerHTML = html;
+                };
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        });
+    </script>
+</body>
+</html>

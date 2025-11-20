@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Custom QR Code Generator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+        }
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            background: #e5e7eb;
+            height: 6px;
+            border-radius: 3px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+            border: none;
+        }
+        .vertical-slider {
+            writing-mode: bt-lr;
+            -webkit-appearance: slider-vertical;
+            width: 6px;
+            height: 100%;
+        }
+    </style>
+</head>
+<body class="bg-gray-50">
+    <div class="flex h-screen">
+        <!-- Controls -->
+        <div class="w-80 bg-white p-6 overflow-y-auto border-r border-gray-200">
+            <h1 class="text-2xl font-bold mb-6">QR Code Generator</h1>
+
+            <!-- QR Input -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">QR Code Input</label>
+                <div class="space-y-3">
+                    <div>
+                        <input
+                            type="text"
+                            id="qrText"
+                            value="https://example.com"
+                            placeholder="Enter URL or text"
+                            class="w-full px-3 py-2 border border-gray-300 rounded"
+                        />
+                        <button
+                            id="generateBtn"
+                            class="w-full mt-2 px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
+                        >
+                            Generate QR Code
+                        </button>
+                    </div>
+                    <div class="text-center text-sm text-gray-500">OR</div>
+                    <div>
+                        <label class="flex items-center justify-center px-4 py-2 bg-gray-100 border border-gray-300 rounded cursor-pointer hover:bg-gray-200">
+                            <span>📤 Upload QR Code</span>
+                            <input type="file" id="qrUpload" accept="image/*" class="hidden" />
+                        </label>
+                        <select id="qrSize" class="w-full mt-2 px-3 py-2 border border-gray-300 rounded hidden">
+                            <option value="21">21×21</option>
+                            <option value="25" selected>25×25</option>
+                            <option value="29">29×29</option>
+                            <option value="33">33×33</option>
+                            <option value="37">37×37</option>
+                            <option value="41">41×41</option>
+                            <option value="45">45×45</option>
+                            <option value="49">49×49</option>
+                            <option value="53">53×53</option>
+                            <option value="57">57×57</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Logo Upload -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Background Logo</label>
+                <label class="flex items-center justify-center px-4 py-2 bg-blue-600 text-white rounded cursor-pointer hover:bg-blue-700">
+                    <span>📤 Upload Logo</span>
+                    <input type="file" id="logoUpload" accept="image/*" class="hidden" />
+                </label>
+            </div>
+
+            <!-- Module Size -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Module Size: <span id="moduleSizeLabel">100</span>%</label>
+                <input type="range" id="moduleSize" min="20" max="100" value="100" class="w-full" />
+            </div>
+
+            <!-- Finder Corner Radius -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Finder Corners: <span id="finderRadiusLabel">0</span>%</label>
+                <input type="range" id="finderRadius" min="0" max="50" value="0" class="w-full" />
+            </div>
+
+            <!-- Dark Color -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Dark Module Color</label>
+                <div class="flex gap-2">
+                    <input type="color" id="darkColor" value="#000000" class="w-16 h-10" />
+                    <input type="range" id="darkAlpha" min="0" max="1" step="0.01" value="1" class="flex-1" />
+                    <span id="darkAlphaLabel" class="text-sm self-center">100%</span>
+                </div>
+            </div>
+
+            <!-- Light Color -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">Light Module Color</label>
+                <div class="flex gap-2">
+                    <input type="color" id="lightColor" value="#ffffff" class="w-16 h-10" />
+                    <input type="range" id="lightAlpha" min="0" max="1" step="0.01" value="1" class="flex-1" />
+                    <span id="lightAlphaLabel" class="text-sm self-center">100%</span>
+                </div>
+            </div>
+
+            <!-- QR Scale -->
+            <div class="mb-6">
+                <label class="block text-sm font-medium mb-2">QR Size: <span id="qrScaleLabel">100</span>px</label>
+                <input type="range" id="qrScale" min="100" max="800" value="100" class="w-full" />
+            </div>
+
+            <!-- Export -->
+            <button id="exportBtn" class="w-full flex items-center justify-center px-4 py-3 bg-green-600 text-white rounded hover:bg-green-700">
+                <span>💾 Export PNG</span>
+            </button>
+        </div>
+
+        <!-- Preview -->
+        <div class="flex-1 flex items-center justify-center p-8">
+            <div class="relative">
+                <!-- Horizontal position slider -->
+                <div class="absolute -top-12 left-0 right-0 px-8">
+                    <input type="range" id="posX" min="0" max="100" value="50" class="w-full" />
+                </div>
+
+                <!-- Vertical position slider -->
+                <div class="absolute -left-12 top-0 bottom-0 py-8 flex items-center">
+                    <input type="range" id="posY" min="0" max="100" value="50" class="vertical-slider" />
+                </div>
+
+                <!-- Canvas -->
+                <canvas id="canvas" class="border-2 border-gray-300 shadow-lg bg-white" width="600" height="600"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let state = {
+            qrText: 'https://example.com',
+            uploadedQR: null,
+            generatedQR: null,
+            useUploadedQR: false,
+            qrSize: 25,
+            logoImage: null,
+            moduleSize: 100,
+            finderRadius: 0,
+            darkColor: '#000000',
+            darkAlpha: 1,
+            lightColor: '#ffffff',
+            lightAlpha: 1,
+            qrScale: 100,
+            posX: 50,
+            posY: 50
+        };
+
+        // Elements
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const qrText = document.getElementById('qrText');
+        const generateBtn = document.getElementById('generateBtn');
+        const qrUpload = document.getElementById('qrUpload');
+        const qrSizeSelect = document.getElementById('qrSize');
+        const logoUpload = document.getElementById('logoUpload');
+        const moduleSize = document.getElementById('moduleSize');
+        const finderRadius = document.getElementById('finderRadius');
+        const darkColor = document.getElementById('darkColor');
+        const darkAlpha = document.getElementById('darkAlpha');
+        const lightColor = document.getElementById('lightColor');
+        const lightAlpha = document.getElementById('lightAlpha');
+        const qrScale = document.getElementById('qrScale');
+        const posX = document.getElementById('posX');
+        const posY = document.getElementById('posY');
+        const exportBtn = document.getElementById('exportBtn');
+
+        // QR Code Generation
+        function generateQRCode() {
+            if (!state.qrText.trim()) return;
+
+            const size = 25;
+            const matrix = createQRMatrix(state.qrText);
+
+            const qrCanvas = document.createElement('canvas');
+            const moduleSize = 8;
+            const canvasSize = matrix.length * moduleSize;
+            qrCanvas.width = canvasSize;
+            qrCanvas.height = canvasSize;
+            const qrCtx = qrCanvas.getContext('2d');
+
+            for (let row = 0; row < matrix.length; row++) {
+                for (let col = 0; col < matrix.length; col++) {
+                    qrCtx.fillStyle = matrix[row][col] ? '#000000' : '#ffffff';
+                    qrCtx.fillRect(col * moduleSize, row * moduleSize, moduleSize, moduleSize);
+                }
+            }
+
+            state.generatedQR = qrCanvas.toDataURL();
+            state.useUploadedQR = false;
+            drawCanvas();
+        }
+
+        function createQRMatrix(text) {
+            const size = 25;
+            const matrix = Array(size).fill(0).map(() => Array(size).fill(false));
+
+            const addFinderPattern = (row, col) => {
+                for (let i = -1; i <= 7; i++) {
+                    for (let j = -1; j <= 7; j++) {
+                        const r = row + i;
+                        const c = col + j;
+                        if (r >= 0 && r < size && c >= 0 && c < size) {
+                            if ((i === -1 || i === 7 || j === -1 || j === 7) ||
+                                (i >= 0 && i <= 6 && j >= 0 && j <= 6 &&
+                                 ((i === 0 || i === 6) || (j === 0 || j === 6))) ||
+                                (i >= 2 && i <= 4 && j >= 2 && j <= 4)) {
+                                matrix[r][c] = true;
+                            }
+                        }
+                    }
+                }
+            };
+
+            addFinderPattern(0, 0);
+            addFinderPattern(0, size - 7);
+            addFinderPattern(size - 7, 0);
+
+            for (let i = 8; i < size - 8; i++) {
+                matrix[6][i] = i % 2 === 0;
+                matrix[i][6] = i % 2 === 0;
+            }
+
+            let dataIndex = 0;
+            const textHash = text.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+            for (let col = size - 1; col > 0; col -= 2) {
+                if (col === 6) col--;
+                for (let row = 0; row < size; row++) {
+                    for (let c = 0; c < 2; c++) {
+                        const currentCol = col - c;
+                        if (!isReserved(row, currentCol, size)) {
+                            const bit = ((textHash + dataIndex) % 2) === 0;
+                            matrix[row][currentCol] = bit;
+                            dataIndex++;
+                        }
+                    }
+                }
+            }
+
+            return matrix;
+        }
+
+        function isReserved(row, col, size) {
+            if ((row < 9 && col < 9) ||
+                (row < 9 && col >= size - 8) ||
+                (row >= size - 8 && col < 9)) {
+                return true;
+            }
+            if (row === 6 || col === 6) return true;
+            return false;
+        }
+
+        function isFinderPattern(x, y, size) {
+            const finderSize = 7;
+            if (x < finderSize && y < finderSize) return true;
+            if (x >= size - finderSize && y < finderSize) return true;
+            if (x < finderSize && y >= size - finderSize) return true;
+            return false;
+        }
+
+        function hexToRgba(hex, alpha) {
+            const r = parseInt(hex.slice(1, 3), 16);
+            const g = parseInt(hex.slice(3, 5), 16);
+            const b = parseInt(hex.slice(5, 7), 16);
+            return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+        }
+
+        function drawCanvas() {
+            const canvasSize = 600;
+            ctx.clearRect(0, 0, canvasSize, canvasSize);
+
+            if (state.logoImage) {
+                const img = new Image();
+                img.onload = () => {
+                    ctx.drawImage(img, 0, 0, canvasSize, canvasSize);
+                    drawQROverlay(canvasSize);
+                };
+                img.src = state.logoImage;
+            } else {
+                const checkSize = 20;
+                for (let y = 0; y < canvasSize; y += checkSize) {
+                    for (let x = 0; x < canvasSize; x += checkSize) {
+                        ctx.fillStyle = ((x / checkSize + y / checkSize) % 2 === 0) ? '#e0e0e0' : '#ffffff';
+                        ctx.fillRect(x, y, checkSize, checkSize);
+                    }
+                }
+                drawQROverlay(canvasSize);
+            }
+        }
+
+        function drawQROverlay(canvasSize) {
+            const qrImage = state.useUploadedQR ? state.uploadedQR : state.generatedQR;
+            if (!qrImage) return;
+
+            const img = new Image();
+            img.onload = () => {
+                const qrCanvas = document.createElement('canvas');
+                const qrCtx = qrCanvas.getContext('2d');
+
+                const moduleCount = state.useUploadedQR ? state.qrSize : 25;
+                const qrPixelSize = state.qrScale;
+
+                qrCanvas.width = qrPixelSize;
+                qrCanvas.height = qrPixelSize;
+
+                const tempCanvas = document.createElement('canvas');
+                const tempCtx = tempCanvas.getContext('2d');
+                tempCanvas.width = img.width;
+                tempCanvas.height = img.height;
+                tempCtx.drawImage(img, 0, 0);
+
+                const imageData = tempCtx.getImageData(0, 0, img.width, img.height);
+                const modulePixelSize = qrPixelSize / moduleCount;
+
+                for (let y = 0; y < moduleCount; y++) {
+                    for (let x = 0; x < moduleCount; x++) {
+                        const pixelStartX = (x * img.width) / moduleCount;
+                        const pixelStartY = (y * img.height) / moduleCount;
+
+                        const sampleX = Math.floor(pixelStartX + (img.width / moduleCount) / 2);
+                        const sampleY = Math.floor(pixelStartY + (img.height / moduleCount) / 2);
+
+                        const clampedX = Math.min(sampleX, img.width - 1);
+                        const clampedY = Math.min(sampleY, img.height - 1);
+
+                        const pixelIndex = (clampedY * img.width + clampedX) * 4;
+                        const isDark = imageData.data[pixelIndex] < 128;
+
+                        const isFinder = isFinderPattern(x, y, moduleCount);
+                        const currentModuleSize = isFinder ? 1 : state.moduleSize / 100;
+
+                        const moduleX = x * modulePixelSize;
+                        const moduleY = y * modulePixelSize;
+                        const shrunkSize = modulePixelSize * currentModuleSize;
+                        const offset = (modulePixelSize - shrunkSize) / 2;
+
+                        qrCtx.fillStyle = isDark ? hexToRgba(state.darkColor, state.darkAlpha) : hexToRgba(state.lightColor, state.lightAlpha);
+
+                        if (isFinder && state.finderRadius > 0) {
+                            const radius = (modulePixelSize * state.finderRadius) / 100;
+                            qrCtx.beginPath();
+                            qrCtx.roundRect(moduleX, moduleY, modulePixelSize, modulePixelSize, radius);
+                            qrCtx.fill();
+                        } else {
+                            qrCtx.fillRect(moduleX + offset, moduleY + offset, shrunkSize, shrunkSize);
+                        }
+                    }
+                }
+
+                const overlayX = (canvasSize * state.posX / 100) - (qrPixelSize / 2);
+                const overlayY = (canvasSize * state.posY / 100) - (qrPixelSize / 2);
+                ctx.drawImage(qrCanvas, overlayX, overlayY);
+            };
+            img.src = qrImage;
+        }
+
+        // Event Listeners
+        generateBtn.addEventListener('click', generateQRCode);
+
+        qrUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        if (img.width === img.height) {
+                            state.uploadedQR = event.target.result;
+                            state.useUploadedQR = true;
+                            qrSizeSelect.classList.remove('hidden');
+                            drawCanvas();
+                        } else {
+                            alert('QR code image must be square');
+                        }
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        qrSizeSelect.addEventListener('change', (e) => {
+            state.qrSize = parseInt(e.target.value);
+            drawCanvas();
+        });
+
+        logoUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (event) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        state.logoImage = event.target.result;
+                        state.qrScale = Math.max(img.width, img.height);
+                        qrScale.value = state.qrScale;
+                        document.getElementById('qrScaleLabel').textContent = state.qrScale;
+                        drawCanvas();
+                    };
+                    img.src = event.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        });
+
+        moduleSize.addEventListener('input', (e) => {
+            state.moduleSize = parseInt(e.target.value);
+            document.getElementById('moduleSizeLabel').textContent = state.moduleSize;
+            drawCanvas();
+        });
+
+        finderRadius.addEventListener('input', (e) => {
+            state.finderRadius = parseInt(e.target.value);
+            document.getElementById('finderRadiusLabel').textContent = state.finderRadius;
+            drawCanvas();
+        });
+
+        darkColor.addEventListener('input', (e) => {
+            state.darkColor = e.target.value;
+            drawCanvas();
+        });
+
+        darkAlpha.addEventListener('input', (e) => {
+            state.darkAlpha = parseFloat(e.target.value);
+            document.getElementById('darkAlphaLabel').textContent = Math.round(state.darkAlpha * 100) + '%';
+            drawCanvas();
+        });
+
+        lightColor.addEventListener('input', (e) => {
+            state.lightColor = e.target.value;
+            drawCanvas();
+        });
+
+        lightAlpha.addEventListener('input', (e) => {
+            state.lightAlpha = parseFloat(e.target.value);
+            document.getElementById('lightAlphaLabel').textContent = Math.round(state.lightAlpha * 100) + '%';
+            drawCanvas();
+        });
+
+        qrScale.addEventListener('input', (e) => {
+            state.qrScale = parseInt(e.target.value);
+            document.getElementById('qrScaleLabel').textContent = state.qrScale;
+            drawCanvas();
+        });
+
+        posX.addEventListener('input', (e) => {
+            state.posX = parseInt(e.target.value);
+            drawCanvas();
+        });
+
+        posY.addEventListener('input', (e) => {
+            state.posY = parseInt(e.target.value);
+            drawCanvas();
+        });
+
+        qrText.addEventListener('input', (e) => {
+            state.qrText = e.target.value;
+        });
+
+        exportBtn.addEventListener('click', () => {
+            try {
+                canvas.toBlob((blob) => {
+                    if (blob) {
+                        const url = URL.createObjectURL(blob);
+                        const link = document.createElement('a');
+                        link.download = 'custom-qr-code.png';
+                        link.href = url;
+                        document.body.appendChild(link);
+                        link.click();
+                        document.body.removeChild(link);
+                        URL.revokeObjectURL(url);
+                    }
+                }, 'image/png');
+            } catch (error) {
+                console.error('Export error:', error);
+                const link = document.createElement('a');
+                link.download = 'custom-qr-code.png';
+                link.href = canvas.toDataURL('image/png');
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        });
+
+        // Initial draw
+        drawCanvas();
+    </script>
+</body>
+</html>
