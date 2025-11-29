@@ -207,7 +207,7 @@ This project is for educational and security research purposes. Use responsibly 
 ## Links
 
 - **Live Demo**: [GitHub Pages](https://joshpbloom.github.io/qr_ec_stego/) (update when deployed)
-- **Repository**: [GitHub](https://github.com/joshpbloom/qr_ec_stego) (update with actual URL)
+- **Repository**: [GitHub](https://github.com/joshpbloom/qr_ec_stego)
 
 ## Educational Notes
 
