@@ -443,7 +443,37 @@ const QRParser = {
             7: [6, 22, 38],
             8: [6, 24, 42],
             9: [6, 26, 46],
-            10: [6, 28, 50]
+            10: [6, 28, 50],
+            11: [6, 30, 54],
+            12: [6, 32, 58],
+            13: [6, 34, 62],
+            14: [6, 26, 46, 66],
+            15: [6, 26, 48, 70],
+            16: [6, 26, 50, 74],
+            17: [6, 30, 54, 78],
+            18: [6, 30, 56, 82],
+            19: [6, 30, 58, 86],
+            20: [6, 34, 62, 90],
+            21: [6, 28, 50, 72, 94],
+            22: [6, 26, 50, 74, 98],
+            23: [6, 30, 54, 78, 102],
+            24: [6, 28, 54, 80, 106],
+            25: [6, 32, 58, 84, 110],
+            26: [6, 30, 58, 86, 114],
+            27: [6, 34, 62, 90, 118],
+            28: [6, 26, 50, 74, 98, 122],
+            29: [6, 30, 54, 78, 102, 126],
+            30: [6, 26, 52, 78, 104, 130],
+            31: [6, 30, 56, 82, 108, 134],
+            32: [6, 34, 60, 86, 112, 138],
+            33: [6, 30, 58, 86, 114, 142],
+            34: [6, 34, 62, 90, 118, 146],
+            35: [6, 30, 54, 78, 102, 126, 150],
+            36: [6, 24, 50, 76, 102, 128, 154],
+            37: [6, 28, 54, 80, 106, 132, 158],
+            38: [6, 32, 58, 84, 110, 136, 162],
+            39: [6, 26, 54, 82, 110, 138, 166],
+            40: [6, 30, 58, 86, 114, 142, 170]
         };
         return positions[version] || [];
     },
@@ -582,24 +612,24 @@ const QRParser = {
         console.log(`[Padding] Bytes at padding start:`, dataCodewords.slice(padByteStart, padByteStart + 5));
 
         // Check if we have room for length prefix
-        if (padByteStart + 2 > dataCodewords.length) {
+        if (padByteStart + 1 > dataCodewords.length) {
             console.log(`[Padding] Not enough room for length prefix`);
             return '';
         }
 
-        // Read length-prefixed secret
-        const secretLen = (dataCodewords[padByteStart] << 8) | dataCodewords[padByteStart + 1];
+        // Read length-prefixed secret (1 byte)
+        const secretLen = dataCodewords[padByteStart];
 
         console.log(`[Padding] Secret length from prefix: ${secretLen}`);
 
         // Validate
-        if (secretLen === 0 || secretLen > 100 || padByteStart + 2 + secretLen > dataCodewords.length) {
+        if (secretLen === 0 || secretLen > 255 || padByteStart + 1 + secretLen > dataCodewords.length) {
             console.log(`[Padding] Invalid secret length`);
             return '';
         }
 
         // Extract secret
-        const secret = dataCodewords.slice(padByteStart + 2, padByteStart + 2 + secretLen);
+        const secret = dataCodewords.slice(padByteStart + 1, padByteStart + 1 + secretLen);
         console.log(`[Padding] Secret bytes:`, secret);
         const secretStr = this.bytesToString(secret);
         console.log(`[Padding] Secret string: "${secretStr}"`);
@@ -627,12 +657,12 @@ const QRParser = {
 
         console.log(`[ECC] Extracted ${secretBytes.length} secret bytes:`, secretBytes);
 
-        // Check for length-prefixed secret
-        if (secretBytes.length >= 2) {
-            const length = (secretBytes[0] << 8) | secretBytes[1];
+        // Check for length-prefixed secret (1 byte)
+        if (secretBytes.length >= 1) {
+            const length = secretBytes[0];
             console.log(`[ECC] Secret length from prefix: ${length}`);
-            if (length > 0 && length < secretBytes.length && length < 100) {
-                const secret = secretBytes.slice(2, 2 + length);
+            if (length > 0 && length < secretBytes.length && length < 255) {
+                const secret = secretBytes.slice(1, 1 + length);
                 const secretStr = this.bytesToString(secret);
                 console.log(`[ECC] Secret string: "${secretStr}"`);
                 return secretStr;

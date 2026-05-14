@@ -2,18 +2,55 @@
 
 let compareImages = { img1: null, img2: null };
 let decodeImageData = null;
+let encodeResult = null;
+let stegoMode = 'padding'; // 'padding' | 'ecc'
+
+// ── Notification system ──────────────────────────────────────────────────────
+
+function showNotification(message, type = 'info', duration = 4000) {
+    const container = document.getElementById('notification-container');
+    const el = document.createElement('div');
+    el.className = `notification ${type}`;
+    el.textContent = message;
+    container.appendChild(el);
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => el.classList.add('show'));
+    });
+    const dismiss = () => {
+        el.classList.remove('show');
+        setTimeout(() => el.remove(), 300);
+    };
+    el.addEventListener('click', dismiss);
+    setTimeout(dismiss, duration);
+}
+
+// ── Stego mode toggle ────────────────────────────────────────────────────────
+
+function setStegoMode(mode) {
+    stegoMode = mode;
+    const isPadding = mode === 'padding';
+    document.getElementById('mode-padding-btn').className =
+        `flex-1 py-2 text-center transition ${isPadding ? 'bg-accent-primary text-white' : 'bg-dark-elevated text-dark-muted'}`;
+    document.getElementById('mode-ecc-btn').className =
+        `flex-1 py-2 text-center transition ${!isPadding ? 'bg-accent-secondary text-white' : 'bg-dark-elevated text-dark-muted'}`;
+    document.getElementById('mode-padding-input').classList.toggle('hidden', !isPadding);
+    document.getElementById('mode-ecc-input').classList.toggle('hidden', isPadding);
+    // Clear the inactive field so it does not accidentally influence encoding
+    if (isPadding) {
+        document.getElementById('encode-ecc').value = '';
+    } else {
+        document.getElementById('encode-padding').value = '';
+    }
+}
 
 // Tab switching
 function switchTab(tabName) {
-    // Hide all tab contents
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-    // Remove active class from all buttons
     document.querySelectorAll('.tab-button').forEach(el => {
         el.classList.remove('active');
         el.classList.add('glass');
     });
 
-    // Show selected tab
     document.getElementById(`content-${tabName}`).classList.remove('hidden');
     document.getElementById(`tab-${tabName}`).classList.remove('glass');
     document.getElementById(`tab-${tabName}`).classList.add('active');
@@ -50,6 +87,14 @@ function setupDecodeUpload() {
     });
 }
 
+// Pre-fill encode inputs with a quick demo message
+function setupEncodeDefaults() {
+    document.getElementById('encode-decoy').value = 'SCAN ME!';
+    document.getElementById('encode-padding').value = 'padding secret';
+    document.getElementById('encode-ecc').value = '';
+    setStegoMode('padding');
+}
+
 // Handle file upload for decoding
 function handleDecodeFile(file) {
     const reader = new FileReader();
@@ -68,20 +113,70 @@ function handleDecodeFile(file) {
 
 // Load example QR codes
 async function loadExample(example) {
-    const exampleFiles = {
-        'challenge1': '../ctf_challenges/challenge1_qr.png',
-        'challenge2': '../ctf_challenges/challenge2_qr.png'
-    };
-
     try {
         const response = await fetch(`examples/${example}.png`);
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const blob = await response.blob();
         const file = new File([blob], `${example}.png`, { type: 'image/png' });
         handleDecodeFile(file);
     } catch (error) {
-        alert('Example not found. Make sure example files are in docs/examples/');
+        showNotification('Example not found. Make sure example files are in docs/examples/', 'warning');
         console.error(error);
     }
+}
+
+// Generate stego QR in-browser using GJ-based ECC payload approach
+async function generateStego() {
+    const decoy = document.getElementById('encode-decoy').value || '';
+    // Only the active mode contributes a secret; the other field is cleared by setStegoMode
+    const paddingSecret = stegoMode === 'padding' ? (document.getElementById('encode-padding').value || '') : '';
+    const eccSecret = stegoMode === 'ecc' ? (document.getElementById('encode-ecc').value || '') : '';
+    const version = parseInt(document.getElementById('encode-version').value, 10);
+    const eccLevel = document.getElementById('encode-ecc-level').value;
+    const mask = parseInt(document.getElementById('encode-mask').value, 10);
+    const autoVersion = document.getElementById('encode-auto-version').checked;
+
+    try {
+        encodeResult = await QRStego.encodeStego({
+            decoy,
+            paddingSecret,
+            eccSecret,
+            version,
+            eccLevel,
+            mask,
+            autoVersion
+        });
+
+        const canvasTarget = document.getElementById('encode-canvas');
+        canvasTarget.width = encodeResult.canvas.width;
+        canvasTarget.height = encodeResult.canvas.height;
+        const ctx = canvasTarget.getContext('2d');
+        ctx.clearRect(0, 0, canvasTarget.width, canvasTarget.height);
+        ctx.drawImage(encodeResult.canvas, 0, 0);
+
+        document.getElementById('encode-preview').classList.remove('hidden');
+        document.getElementById('encode-meta').classList.remove('hidden');
+        document.getElementById('encode-pad-cap').innerText = `${encodeResult.padCapacity} bytes`;
+        document.getElementById('encode-ecc-cap').innerText = `${encodeResult.eccCapacity} bytes`;
+        document.getElementById('encode-meta-version').innerText = encodeResult.version;
+        document.getElementById('encode-download').disabled = false;
+        showNotification('Stego QR generated. Scan shows the decoy message.', 'success');
+    } catch (error) {
+        if (error.message && error.message.includes('version <=10')) {
+            showNotification('Encoding failed: data too large for versions ≤10. Reduce text or use the Python tool for higher versions.', 'error', 6000);
+        } else {
+            showNotification('Encoding failed: ' + error.message, 'error', 6000);
+        }
+        console.error(error);
+    }
+}
+
+function downloadStego() {
+    if (!encodeResult || !encodeResult.dataUrl) return;
+    const link = document.createElement('a');
+    link.href = encodeResult.dataUrl;
+    link.download = 'qr_stego.png';
+    link.click();
 }
 
 // Decode QR code and extract secrets
@@ -90,20 +185,18 @@ async function decodeQR() {
 
     const extractPadding = document.getElementById('decode-padding').checked;
     const extractECC = document.getElementById('decode-ecc').checked;
-    const kPerBlock = parseInt(document.getElementById('decode-k-per-block').value);
 
     try {
         const result = await QRStego.decode({
             image: decodeImageData.img,
             extractPadding,
-            extractECC,
-            kPerBlock
+            extractECC
         });
 
         displayDecodeResults(result);
         document.getElementById('export-decode-btn').disabled = false;
     } catch (error) {
-        alert('Error decoding QR code: ' + error.message);
+        showNotification('Error decoding QR code: ' + error.message, 'error', 6000);
         console.error(error);
     }
 }
@@ -115,7 +208,6 @@ function displayDecodeResults(result) {
 
     let html = '';
 
-    // Visible message
     html += `
         <div class="glass rounded-lg p-4">
             <div class="text-sm font-semibold text-accent-primary mb-2">Visible Message</div>
@@ -123,7 +215,6 @@ function displayDecodeResults(result) {
         </div>
     `;
 
-    // QR properties
     html += `
         <div class="glass rounded-lg p-4">
             <div class="text-sm font-semibold text-accent-primary mb-2">QR Properties</div>
@@ -136,7 +227,6 @@ function displayDecodeResults(result) {
         </div>
     `;
 
-    // Padding secret
     if (result.paddingSecret !== null) {
         const found = result.paddingSecret !== '';
         html += `
@@ -149,7 +239,6 @@ function displayDecodeResults(result) {
         `;
     }
 
-    // ECC secret
     if (result.eccSecret !== null) {
         const found = result.eccSecret !== '';
         html += `
@@ -158,7 +247,6 @@ function displayDecodeResults(result) {
                     ${found ? '✓ ECC Secret Found' : 'No ECC Secret'}
                 </div>
                 ${found ? `<div class="code-block rounded p-3 break-all">${escapeHtml(result.eccSecret)}</div>` : ''}
-                ${found ? `<div class="text-xs text-dark-muted mt-2">Extracted using k=${result.kPerBlock} bytes per block</div>` : ''}
             </div>
         `;
     }
@@ -168,7 +256,6 @@ function displayDecodeResults(result) {
 
 // Export decode report
 function exportDecodeReport() {
-    // This will be implemented with detailed JSON export
     const report = {
         timestamp: new Date().toISOString(),
         filename: decodeImageData.file.name,
@@ -229,7 +316,6 @@ function handleCompareFile(num, file) {
             document.getElementById(`compare-image-${num}`).src = e.target.result;
             document.getElementById(`compare-preview-${num}`).classList.remove('hidden');
 
-            // Enable compare button if both images loaded
             if (compareImages.img1 && compareImages.img2) {
                 document.getElementById('compare-btn').disabled = false;
             }
@@ -248,7 +334,7 @@ async function compareQRs() {
         displayCompareResults(result);
         document.getElementById('export-compare-btn').disabled = false;
     } catch (error) {
-        alert('Error comparing QR codes: ' + error.message);
+        showNotification('Error comparing QR codes: ' + error.message, 'error', 6000);
         console.error(error);
     }
 }
@@ -320,15 +406,14 @@ function exportCompareReport() {
     URL.revokeObjectURL(url);
 }
 
-// Utility function to escape HTML
 function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
 }
 
-// Initialize on page load
 document.addEventListener('DOMContentLoaded', () => {
+    setupEncodeDefaults();
     setupDecodeUpload();
     setupCompareUploads();
 });
