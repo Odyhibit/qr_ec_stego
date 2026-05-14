@@ -9,7 +9,7 @@ A complete, polished web-based interface for QR code steganography with:
 1. **Encode Tab**
    - Generate QR codes with custom messages
    - Advanced options (version, ECC level, mask, k-per-block)
-   - Real-time QR generation using qrcode-generator library
+   - Stego padding + ECC overwrite (versions 1-10) using Nayuki qrcodegen
    - Download generated QR codes as PNG
    - Generation statistics display
 
@@ -46,9 +46,8 @@ docs/
 ├── WEB_TOOL_SUMMARY.md    # This file
 ├── js/
 │   ├── app.js             # Main app logic & UI
-│   ├── stego.js           # Steganography core
-│   ├── qr-encoder.js      # QR generation
-│   └── qr-decoder.js      # QR decoding & parsing
+│   ├── stego.js           # Steganography core (encode/decode helpers)
+│   └── qr-parser.js       # QR decoding & parsing
 └── examples/
     ├── challenge1.png     # Example with padding secret
     └── challenge2.png     # Example with ECC secret
@@ -87,7 +86,7 @@ docs/
 
 **Libraries (CDN):**
 - Tailwind CSS 3.x - UI framework
-- qrcode-generator 1.4.4 - QR encoding
+- qrcodegen (Nayuki) - QR encoding with codeword access
 - jsQR 1.4.0 - QR decoding
 
 **Browser Support:**
@@ -159,29 +158,19 @@ open docs/index.html
 
 ### What Works Fully
 
-1. ✅ QR code generation (visible message only)
+1. ✅ QR code generation (visible + padding/ECC stego for v1-10)
 2. ✅ QR code decoding (reads visible message)
 3. ✅ Visual comparison of QR codes
 4. ✅ Pixel difference analysis
 5. ✅ Download/export functionality
 6. ✅ Example loading
+7. ✅ Stego extraction (padding + ECC) matching Python format
 
-### What Requires Python Tool
+### When to Use Python Instead
 
-The JavaScript version is a **demonstration interface**. For full steganography:
-
-1. ❌ Encoding secrets into padding bytes
-2. ❌ Encoding secrets into ECC bytes
-3. ❌ Extracting padding secrets
-4. ❌ Extracting ECC secrets
-
-**Why?** Full steganography requires:
-- Bit-level QR code manipulation
-- Custom Reed-Solomon implementation
-- QR codeword deinterleaving
-- Complex byte extraction logic
-
-These are implemented in `padding_ecc_stego_v3_8bit.py`.
+- Need versions >10 or larger capacity
+- Want command-line batch generation/extraction
+- Need more aggressive ECC overwrites with custom safety tuning
 
 ### Recommended Use
 
@@ -288,7 +277,7 @@ When showing this tool:
 
 **Libraries Used:**
 - Tailwind CSS (MIT License)
-- qrcode-generator by Kazuhiko Arase (MIT License)  
+- qrcodegen by Nayuki (MIT License)  
 - jsQR by cozmo (Apache 2.0 License)
 
 **Created by:** Josh Bloom

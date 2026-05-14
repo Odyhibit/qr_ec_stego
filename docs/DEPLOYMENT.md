@@ -147,7 +147,7 @@ If you want the tool to work offline:
 
 1. Download libraries:
    - Tailwind CSS (or compile custom build)
-   - qrcode-generator library
+   - qrcodegen library
    - jsQR library
 
 2. Update script tags in `index.html`:
