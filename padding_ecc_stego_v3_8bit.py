@@ -6,7 +6,8 @@ padding_stego_8bit_v3.py
 - Optionally embed another secret in **ECC bytes** via Gauss-Jordan elimination.
 - Supports versions 1..40, ECC L/M/Q/H, masks 0..7.
 - Decode auto-detects version/ECC/mask; no secret length required.
-- Both padding and ECC secrets use a 1-byte length prefix for reliable extraction.
+- Padding secrets use a 1-byte length prefix; ECC secrets use a 1-byte length
+  suffix at the end of the deinterleaved ECC bytes.
 - GJ approach produces 100% valid QRs — ECC is legitimately recomputed from
   modified data bytes rather than being overwritten directly.
 """
@@ -113,6 +114,13 @@ def make_function_map(version):
 
     # --- Dark module ---
     F[n - 8][8] = True
+
+    # --- Version information areas (versions 7+) ---
+    if version >= 7:
+        for i in range(6):
+            for j in range(3):
+                F[i][n - 11 + j] = True
+                F[n - 11 + j][i] = True
     # show_boolean_matrix(F)
 
     return F
@@ -262,7 +270,7 @@ _rs_divisor_cache: dict = {}
 def _reed_solomon(data: list, nc: int) -> list:
     if nc not in _rs_divisor_cache:
         _rs_divisor_cache[nc] = QrCode._reed_solomon_compute_divisor(nc)
-    return QrCode._reed_solomon_compute_remainder(data, _rs_divisor_cache[nc])
+    return list(QrCode._reed_solomon_compute_remainder(data, _rs_divisor_cache[nc]))
 
 
 # ─────────────────────── Gauss-Jordan block solver ────────────────────────────
@@ -366,71 +374,89 @@ def _pad_start_bits(decoy_len: int, version: int, ecc) -> int:
 
 
 def calc_ecc_capacity(data_block_lens: List[int], lock_bytes: int, ecc_per_block: int) -> int:
-    """GJ-accessible ECC bytes: each block contributes min(free_bytes, ecc_per_block)."""
+    """Contiguous GJ-accessible bytes at the end of block-order ECC."""
     total = 0
     seq_offset = 0
+    per_block = []
     for blk_len in data_block_lens:
         lock_in_block = max(0, min(lock_bytes - seq_offset, blk_len))
         free_in_block = blk_len - lock_in_block
-        total += min(free_in_block, ecc_per_block)
+        per_block.append(min(free_in_block, ecc_per_block))
         seq_offset += blk_len
+    for block_capacity in reversed(per_block):
+        total += block_capacity
+        if block_capacity < ecc_per_block:
+            break
     return total
+
+
+def build_ecc_payload_plan(data_block_lens: List[int], lock_bytes: int, ecc_per_block: int) -> List[dict]:
+    seq_offset = 0
+    plan = []
+    for block_index, blk_len in enumerate(data_block_lens):
+        start = seq_offset
+        lock_in_block = max(0, min(lock_bytes - start, blk_len))
+        free_in_block = blk_len - lock_in_block
+        seq_offset += blk_len
+        plan.append({
+            "block_index": block_index,
+            "start": start,
+            "length": blk_len,
+            "lock_bytes_in_block": lock_in_block,
+            "payload_bytes": min(free_in_block, ecc_per_block),
+        })
+    return plan
 
 
 def embed_ecc_secret_gj(version: int, ecc, ecc_secret_bytes: bytes,
                          lock_bytes: int, data_codewords: bytearray) -> bytearray:
     """Modify data codewords so qrcodegen produces the desired ECC bytes.
     Uses Gauss-Jordan elimination — the QR remains 100% valid.
-    Payload layout: [len(secret), secret_bytes] written sequentially starting
-    from ECC byte 0 of block 0, matching the JS encoder exactly.
+    Payload layout over deinterleaved block-order ECC:
+    [...reversed(secret_bytes), len(secret)] at the end of the ECC string.
     """
     data_block_lens, ecc_per_block = _block_layout(version, ecc)
 
     if len(ecc_secret_bytes) > 255:
-        raise ValueError("ECC secret too long for 1-byte length prefix (max 255 bytes).")
-    ecc_payload = bytes([len(ecc_secret_bytes)]) + ecc_secret_bytes
+        raise ValueError("ECC secret too long for 1-byte length suffix (max 255 bytes).")
+    ecc_payload = bytes(reversed(ecc_secret_bytes)) + bytes([len(ecc_secret_bytes)])
 
-    seq_offset = 0
     secret_offset = 0
-    solved: list = []
+    solved: List[Optional[List[int]]] = [None] * len(data_block_lens)
+    payload_plan = build_ecc_payload_plan(data_block_lens, lock_bytes, ecc_per_block)
 
-    for blk_len in data_block_lens:
-        blk_data = list(data_codewords[seq_offset: seq_offset + blk_len])
-        lock_in_block = max(0, min(lock_bytes - seq_offset, blk_len))
-        free_in_block = blk_len - lock_in_block
-        block_ecc_bytes = min(free_in_block, ecc_per_block)
-        payload_in_block = min(block_ecc_bytes, len(ecc_payload) - secret_offset)
+    for block_plan in reversed(payload_plan):
+        blk_data = list(data_codewords[block_plan["start"]: block_plan["start"] + block_plan["length"]])
+        payload_in_block = min(block_plan["payload_bytes"], len(ecc_payload) - secret_offset)
 
         if payload_in_block > 0:
             gj = GJBlock(blk_data, ecc_per_block)
-            for bit in range(lock_in_block * 8):
+            for bit in range(block_plan["lock_bytes_in_block"] * 8):
                 gj.lock_bit(bit)
             failures = 0
+            ecc_start = ecc_per_block - payload_in_block
+            payload_start = len(ecc_payload) - secret_offset - payload_in_block
             for byte_idx in range(payload_in_block):
-                b = ecc_payload[secret_offset + byte_idx]
+                b = ecc_payload[payload_start + byte_idx]
                 for bit_idx in range(8):
-                    if not gj.set_ecc_bit(byte_idx, bit_idx, (b >> (7 - bit_idx)) & 1):
+                    if not gj.set_ecc_bit(ecc_start + byte_idx, bit_idx, (b >> (7 - bit_idx)) & 1):
                         failures += 1
             if failures:
                 print(f"Warning: GJBlock: {failures} ECC bits could not be set")
             secret_offset += payload_in_block
-            solved.extend(gj.data_bytes)
+            solved[block_plan["block_index"]] = gj.data_bytes
         else:
-            solved.extend(blk_data)
+            solved[block_plan["block_index"]] = blk_data
 
-        seq_offset += blk_len
-
-    return bytearray(solved)
+    return bytearray(b for block in solved if block is not None for b in block)
 
 
 def extract_ecc_secret_gj(M: List[List[bool]], version: int, ecc, mask_id: int,
                            decoy_len: int) -> Optional[bytes]:
     """Extract ECC secret written by embed_ecc_secret_gj.
 
-    Mirrors the encoder exactly: compute lock_bytes from the decoy header and any
-    padding secret found in the data codewords, then collect only the driven ECC
-    bytes (blockEccBytes = min(freeInBlock, eccPerBlock)) from each block in order.
-    This correctly handles the case where block 0 is fully or partially locked.
+    The final ECC byte is the secret length. The preceding length bytes are the
+    UTF-8 secret in reverse byte order.
     """
     raw = QrCode._get_num_raw_data_modules(version)
     total_cw = raw // 8
@@ -446,22 +472,6 @@ def extract_ecc_secret_gj(M: List[List[bool]], version: int, ecc, mask_id: int,
     all_bits = [1 if dem[y][x] else 0 for (y, x) in coords[:total_cw * 8]]
     all_bytes = bytearray(pack_bits_to_bytes(all_bits))
 
-    # Read data codewords to detect padding secret length
-    data_bits_interleaved = [1 if dem[y][x] else 0 for (y, x) in coords[:D * 8]]
-    data_cw = deinterleave_data(bytearray(pack_bits_to_bytes(data_bits_interleaved)), version, ecc)
-
-    pad_start = _pad_start_bits(decoy_len, version, ecc)
-    pad_byte_start = pad_start // 8
-    pad_bytes_capacity = (D * 8 - pad_start) // 8
-
-    pad_secret_len = 0
-    if pad_byte_start < len(data_cw):
-        len_byte = data_cw[pad_byte_start]
-        if len_byte not in (0xEC, 0x11) and 0 < len_byte <= pad_bytes_capacity - 1:
-            pad_secret_len = len_byte
-
-    lock_bytes = pad_byte_start + (1 + pad_secret_len if pad_secret_len > 0 else 0)
-
     # Deinterleave ECC into per-block arrays
     data_block_lens, _ = _block_layout(version, ecc)
     ecc_blocks = [bytearray() for _ in range(B)]
@@ -472,22 +482,13 @@ def extract_ecc_secret_gj(M: List[List[bool]], version: int, ecc, mask_id: int,
                 ecc_blocks[j].append(all_bytes[pos])
                 pos += 1
 
-    # Collect only the driven ECC bytes from each block (same slice as encoder wrote)
-    payload = bytearray()
-    seq_offset = 0
-    for blk_idx, blk_len in enumerate(data_block_lens):
-        lock_in_block = max(0, min(lock_bytes - seq_offset, blk_len))
-        free_in_block = blk_len - lock_in_block
-        block_ecc_bytes = min(free_in_block, ecc_per_block)
-        payload.extend(ecc_blocks[blk_idx][:block_ecc_bytes])
-        seq_offset += blk_len
-
-    if len(payload) < 1:
+    ecc_codewords = bytearray().join(ecc_blocks)
+    if len(ecc_codewords) < 1:
         return None
-    secret_len = payload[0]
-    if secret_len == 0 or 1 + secret_len > len(payload):
+    secret_len = ecc_codewords[-1]
+    if secret_len == 0 or 1 + secret_len > len(ecc_codewords):
         return None
-    candidate = bytes(payload[1: 1 + secret_len])
+    candidate = bytes(reversed(ecc_codewords[-1 - secret_len:-1]))
     try:
         candidate.decode('utf-8')
     except UnicodeDecodeError:
@@ -535,7 +536,7 @@ def plan_min_settings(decoy_len: int, pad_secret_len: int, ecc_secret_len: int,
             lock_bytes = pad_start // 8 + (overhead_bytes + pad_secret_len if pad_secret_len else 0)
             ecc_cap = calc_ecc_capacity(data_block_lens, lock_bytes, epb)
 
-            # +1 for length prefix byte
+            # +1 for length suffix byte
             if ecc_secret_len + 1 > ecc_cap:
                 continue
 
@@ -694,11 +695,11 @@ def create_stego_qr(decoy: str, secret: str, version: int = 4,
     ecc_cap = calc_ecc_capacity(data_block_lens, lock_bytes, epb)
 
     if len(ecc_secret_bytes) > 255:
-        print("ECC secret too long for 1-byte length prefix (max 255 bytes).")
+        print("ECC secret too long for 1-byte length suffix (max 255 bytes).")
         return
     if len(ecc_secret_bytes) + 1 > ecc_cap:
         print(f"Not enough ECC capacity. Need {len(ecc_secret_bytes) + 1} bytes "
-              f"(incl. 1B length prefix), have {ecc_cap}.")
+              f"(incl. 1B length suffix), have {ecc_cap}.")
         return
 
     if check_only:
@@ -930,7 +931,7 @@ def main():
         print(f"Minimum setting: version {version}, ECC {ecc_name}")
         print(f"Pad capacity: {details['pad_capacity']} bytes (need {args.pad_secret_len + args.overhead})")
         print(f"ECC: {details['blocks']} blocks × {details['ecc_per_block']} ECC bytes (total {details['ecc_total']})")
-        print(f"GJ ECC stego capacity: {details['ecc_capacity']} bytes (need {args.ecc_secret_len + 1} incl. prefix)")
+        print(f"GJ ECC stego capacity: {details['ecc_capacity']} bytes (need {args.ecc_secret_len + 1} incl. suffix)")
     else:
         ap.print_help()
 

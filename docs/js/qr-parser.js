@@ -133,52 +133,37 @@ const QRParser = {
         }
 
         const eccSpec = versionSpec.ecBlocks[formatInfo.eccLevel];
-        console.log(`[Parse] Spec: ${eccSpec.blocks} blocks, ${eccSpec.dataPerBlock} data bytes/block, ${eccSpec.eccPerBlock} ECC bytes/block`);
+        const blockSpec = this.getBlockSpec(versionSpec, eccSpec);
+        console.log(`[Parse] Spec: ${blockSpec.totalBlocks} blocks, ${blockSpec.shortDataSize}/${blockSpec.longDataSize} data bytes/block, ${blockSpec.eccPerBlock} ECC bytes/block`);
 
         // Extract raw bits from QR code
         const bits = this.extractDataBits(modules, version, formatInfo.mask);
         console.log(`[Parse] Extracted ${bits.length} bits`);
 
         // Convert bits to bytes (codewords)
-        const codewords = this.bitsToBytes(bits);
+        const codewords = this.bitsToBytes(bits).slice(0, blockSpec.totalCodewords);
         console.log(`[Parse] Converted to ${codewords.length} codewords`);
         console.log(`[Parse] First 20 codewords:`, codewords.slice(0, 20));
 
-        // Calculate total bytes (handle mixed block sizes)
-        const numShortBlocks = eccSpec.numShort !== undefined ? eccSpec.numShort : eccSpec.blocks;
-        const numLongBlocks = eccSpec.blocks - numShortBlocks;
-        const shortDataSize = eccSpec.dataPerBlock;
-        const longDataSize = eccSpec.dataPerBlock2 || eccSpec.dataPerBlock;
-
-        const totalDataBytes = numShortBlocks * shortDataSize + numLongBlocks * longDataSize;
-        const totalECCBytes = eccSpec.blocks * eccSpec.eccPerBlock;
-
-        // Calculate where data ends in INTERLEAVED stream
-        // Phase 1: shortDataSize bytes from all blocks
-        const phase1Bytes = shortDataSize * eccSpec.blocks;
-        // Phase 2: 1 extra byte from long blocks only
-        const phase2Bytes = numLongBlocks * (longDataSize - shortDataSize);
-        const interleavedDataEnd = phase1Bytes + phase2Bytes;
-
-        console.log(`[Parse] Splitting: ${totalDataBytes} data bytes (${numShortBlocks}×${shortDataSize} + ${numLongBlocks}×${longDataSize}), ${totalECCBytes} ECC bytes`);
-        console.log(`[Parse] Interleaved data ends at position ${interleavedDataEnd}`);
+        console.log(`[Parse] Splitting: ${blockSpec.totalDataBytes} data bytes (${blockSpec.numShortBlocks}×${blockSpec.shortDataSize} + ${blockSpec.numLongBlocks}×${blockSpec.longDataSize}), ${blockSpec.totalECCBytes} ECC bytes`);
+        console.log(`[Parse] Interleaved data ends at position ${blockSpec.totalDataBytes}`);
 
         // Deinterleave data codewords (handling mixed sizes)
         const dataCodewords = this.deinterleaveMixed(
-            codewords.slice(0, interleavedDataEnd),
-            numShortBlocks,
-            shortDataSize,
-            numLongBlocks,
-            longDataSize
+            codewords.slice(0, blockSpec.totalDataBytes),
+            blockSpec.numShortBlocks,
+            blockSpec.shortDataSize,
+            blockSpec.numLongBlocks,
+            blockSpec.longDataSize
         );
 
         console.log(`[Parse] Deinterleaved data (${dataCodewords.length} bytes):`, dataCodewords.slice(0, 20));
 
         // Deinterleave ECC codewords
         const eccCodewords = this.deinterleave(
-            codewords.slice(interleavedDataEnd, interleavedDataEnd + totalECCBytes),
-            eccSpec.blocks,
-            eccSpec.eccPerBlock
+            codewords.slice(blockSpec.totalDataBytes, blockSpec.totalCodewords),
+            blockSpec.totalBlocks,
+            blockSpec.eccPerBlock
         );
 
         console.log(`[Parse] Deinterleaved ECC:`, eccCodewords.slice(0, 20));
@@ -191,7 +176,42 @@ const QRParser = {
             modules,
             dataCodewords,
             eccCodewords,
-            eccSpec
+            eccSpec: {
+                blocks: blockSpec.totalBlocks,
+                dataPerBlock: blockSpec.shortDataSize,
+                dataPerBlock2: blockSpec.longDataSize,
+                eccPerBlock: blockSpec.eccPerBlock,
+                numShort: blockSpec.numShortBlocks,
+                dataBlockLens: blockSpec.dataBlockLens
+            }
+        };
+    },
+
+    getBlockSpec(versionSpec, eccSpec) {
+        const hasSecondGroup = eccSpec.blocks2 !== undefined && eccSpec.blocks2 > 0;
+        const totalBlocks = hasSecondGroup ? eccSpec.blocks + eccSpec.blocks2 : eccSpec.blocks;
+        const numShortBlocks = eccSpec.numShort !== undefined ? eccSpec.numShort : eccSpec.blocks;
+        const numLongBlocks = totalBlocks - numShortBlocks;
+        const shortDataSize = eccSpec.dataPerBlock;
+        const longDataSize = eccSpec.dataPerBlock2 || shortDataSize;
+        const eccPerBlock = eccSpec.eccPerBlock;
+        const totalDataBytes = numShortBlocks * shortDataSize + numLongBlocks * longDataSize;
+        const totalECCBytes = totalBlocks * eccPerBlock;
+
+        return {
+            totalBlocks,
+            numShortBlocks,
+            numLongBlocks,
+            shortDataSize,
+            longDataSize,
+            eccPerBlock,
+            totalDataBytes,
+            totalECCBytes,
+            totalCodewords: versionSpec.totalCodewords,
+            dataBlockLens: [
+                ...Array(numShortBlocks).fill(shortDataSize),
+                ...Array(numLongBlocks).fill(longDataSize)
+            ]
         };
     },
 
@@ -407,6 +427,12 @@ const QRParser = {
 
         // Dark module
         if (x === 8 && y === size - 8) return true;
+
+        // Version information areas (versions 7+)
+        if (version >= 7) {
+            if (y < 6 && x >= size - 11 && x <= size - 9) return true;
+            if (x < 6 && y >= size - 11 && y <= size - 9) return true;
+        }
 
         // Alignment patterns
         const alignmentCenters = this.getAlignmentPatternCenters(version);
@@ -640,29 +666,17 @@ const QRParser = {
      * Extract ECC secret from ECC codewords
      */
     extractECCSecret(eccCodewords, kPerBlock, numBlocks, eccPerBlock) {
-        // Extract first k bytes from each ECC block
-        // eccCodewords is already deinterleaved, so each block has eccPerBlock bytes
-        const secretBytes = [];
-
-        console.log(`[ECC] Extracting ${kPerBlock} bytes from ${numBlocks} blocks (${eccPerBlock} bytes each)`);
+        // Suffix format over deinterleaved ECC bytes in block order:
+        // final byte = length; previous length bytes = reversed secret.
         console.log(`[ECC] Total ECC codewords: ${eccCodewords.length}`);
 
-        for (let block = 0; block < numBlocks; block++) {
-            const blockStart = block * eccPerBlock;  // Each block has eccPerBlock bytes
-            console.log(`[ECC] Block ${block} starts at byte ${blockStart}`);
-            for (let i = 0; i < kPerBlock && blockStart + i < eccCodewords.length; i++) {
-                secretBytes.push(eccCodewords[blockStart + i]);
-            }
-        }
-
-        console.log(`[ECC] Extracted ${secretBytes.length} secret bytes:`, secretBytes);
-
-        // Check for length-prefixed secret (1 byte)
-        if (secretBytes.length >= 1) {
-            const length = secretBytes[0];
-            console.log(`[ECC] Secret length from prefix: ${length}`);
-            if (length > 0 && length < secretBytes.length && length < 255) {
-                const secret = secretBytes.slice(1, 1 + length);
+        if (eccCodewords.length >= 1) {
+            const length = eccCodewords[eccCodewords.length - 1];
+            console.log(`[ECC] Secret length from suffix: ${length}`);
+            if (length > 0 && 1 + length <= eccCodewords.length && length < 255) {
+                const secret = eccCodewords
+                    .slice(eccCodewords.length - 1 - length, eccCodewords.length - 1)
+                    .reverse();
                 const secretStr = this.bytesToString(secret);
                 console.log(`[ECC] Secret string: "${secretStr}"`);
                 return secretStr;

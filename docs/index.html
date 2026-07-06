@@ -93,6 +93,19 @@
             font-family: 'Monaco', 'Courier New', monospace;
             font-size: 0.875rem;
         }
+        details > summary {
+            list-style: none;
+        }
+        details > summary::-webkit-details-marker {
+            display: none;
+        }
+        details > summary .disclosure-arrow {
+            display: inline-block;
+            transition: transform 0.15s ease;
+        }
+        details[open] > summary .disclosure-arrow {
+            transform: rotate(90deg);
+        }
     </style>
 </head>
 <body class="text-dark-text">
@@ -107,7 +120,7 @@
                 Create and extract QR codes with hidden padding/ECC messages
             </p>
             <div class="mt-4 flex justify-center gap-4 text-sm text-dark-muted">
-                <a href="https://github.com/joshpbloom/qr_ec_stego" target="_blank" class="hover:text-accent-primary transition">
+                <a href="https://github.com/Odyhibit/qr_ec_stego" target="_blank" class="hover:text-accent-primary transition">
                     GitHub Repository
                 </a>
                 <span>•</span>
@@ -161,56 +174,58 @@
                                 </div>
                             </div>
 
-                            <!-- Padding secret input (shown when mode=padding) -->
-                            <div id="mode-padding-input">
-                                <label class="block text-sm mb-1 text-dark-muted">Padding Secret <span class="text-xs">(hidden in unused data codewords)</span></label>
-                                <textarea id="encode-padding" rows="2" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm" placeholder="Secret hidden in padding bytes"></textarea>
-                            </div>
-
-                            <!-- ECC secret input (shown when mode=ecc) -->
-                            <div id="mode-ecc-input" class="hidden">
-                                <label class="block text-sm mb-1 text-dark-muted">ECC Secret <span class="text-xs">(hidden in error-correction bytes via GJ solver)</span></label>
-                                <textarea id="encode-ecc" rows="2" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm" placeholder="Secret hidden in ECC bytes"></textarea>
+                            <!-- Secret input; shared between padding/ECC modes since only one is active at a time -->
+                            <div>
+                                <label class="block text-sm mb-1 text-dark-muted"><span id="secret-label"></span> <span id="secret-hint" class="text-xs">(hidden in unused data codewords)</span></label>
+                                <textarea id="encode-secret" rows="2" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm" placeholder="Secret hidden in padding bytes"></textarea>
                             </div>
                         </div>
 
                         <div class="glass rounded-lg p-4 space-y-3">
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="block text-sm mb-1">Version (1-10)</label>
-                                    <input type="number" id="encode-version" min="1" max="10" value="5"
-                                           class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm">
-                                    <label class="flex items-center gap-2 mt-2 text-xs cursor-pointer">
-                                        <input type="checkbox" id="encode-auto-version" checked
-                                               class="w-4 h-4 rounded border-dark-border bg-dark-bg text-accent-primary focus:ring-accent-primary">
-                                        <span>Auto-select smallest version</span>
-                                    </label>
+                            <details>
+                                <summary class="cursor-pointer text-sm font-semibold select-none flex items-center gap-2">
+                                    <span class="disclosure-arrow">▶</span> Advanced Settings
+                                </summary>
+                                <div class="mt-3 space-y-3">
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-sm mb-1">Version (1-10)</label>
+                                            <input type="number" id="encode-version" min="1" max="10" value="1"
+                                                   class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm">
+                                            <label class="flex items-center gap-2 mt-2 text-xs cursor-pointer">
+                                                <input type="checkbox" id="encode-auto-version" checked
+                                                       class="w-4 h-4 rounded border-dark-border bg-dark-bg text-accent-primary focus:ring-accent-primary">
+                                                <span>Auto-select smallest version</span>
+                                            </label>
+                                        </div>
+                                        <div>
+                                            <label class="block text-sm mb-1">ECC Level</label>
+                                            <select id="encode-ecc-level" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm">
+                                                <option value="H">H (High)</option>
+                                                <option value="Q">Q (Quartile)</option>
+                                                <option value="M" selected>M (Medium)</option>
+                                                <option value="L">L (Low)</option>
+                                            </select>
+                                        </div>
+                                    </div>
+                                    <div class="grid grid-cols-2 gap-3">
+                                        <div>
+                                            <label class="block text-sm mb-1">Mask</label>
+                                            <select id="encode-mask" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm">
+                                                <option value="-1" selected>Auto (lowest penalty)</option>
+                                                <option value="0">0</option>
+                                                <option value="1">1</option>
+                                                <option value="2">2</option>
+                                                <option value="3">3</option>
+                                                <option value="4">4</option>
+                                                <option value="5">5</option>
+                                                <option value="6">6</option>
+                                                <option value="7">7</option>
+                                            </select>
+                                        </div>
+                                    </div>
                                 </div>
-                                <div>
-                                    <label class="block text-sm mb-1">ECC Level</label>
-                                    <select id="encode-ecc-level" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm">
-                                        <option value="H">H (High)</option>
-                                        <option value="Q">Q (Quartile)</option>
-                                        <option value="M">M (Medium)</option>
-                                        <option value="L" selected>L (Low)</option>
-                                    </select>
-                                </div>
-                            </div>
-                            <div class="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label class="block text-sm mb-1">Mask</label>
-                                    <select id="encode-mask" class="w-full px-3 py-2 rounded bg-dark-bg border border-dark-border text-dark-text text-sm">
-                                        <option value="0" selected>0</option>
-                                        <option value="1">1</option>
-                                        <option value="2">2</option>
-                                        <option value="3">3</option>
-                                        <option value="4">4</option>
-                                        <option value="5">5</option>
-                                        <option value="6">6</option>
-                                        <option value="7">7</option>
-                                    </select>
-                                </div>
-                            </div>
+                            </details>
                             <p class="text-xs text-dark-muted">Capacities are checked automatically. ECC bytes are legitimately computed from padding — the QR is 100% valid.</p>
                         </div>
 
@@ -227,6 +242,7 @@
                         </div>
                         <div id="encode-meta" class="glass rounded-lg p-4 text-sm space-y-2 hidden">
                             <div><span class="text-dark-muted">Version chosen:</span> <span id="encode-meta-version"></span></div>
+                            <div><span class="text-dark-muted">Mask chosen:</span> <span id="encode-meta-mask"></span></div>
                             <div><span class="text-dark-muted">Pad capacity:</span> <span id="encode-pad-cap"></span></div>
                             <div><span class="text-dark-muted">ECC capacity:</span> <span id="encode-ecc-cap"></span></div>
                             <div class="text-xs text-dark-muted">Version table currently covers 1-10 for in-browser encoding.</div>

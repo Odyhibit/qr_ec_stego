@@ -1,7 +1,7 @@
 // QR Code Steganography Decoder/Encoder Module (GJ-based approach)
 //
 // Hides a message in ECC bytes by solving for padding values that produce
-// the desired ECC output. The QR is 100% valid — no bytes are overwritten.
+// the desired ECC output. The QR is 100% valid — no bytes rely on error correction.
 
 const textEncoder = new TextEncoder();
 
@@ -192,8 +192,7 @@ function drawModules(modules, scale = 8, border = 4) {
 // GJBlock must use the SAME RS polynomial as qrcodegen so that data bytes
 // solved by GJ produce the expected ECC when qrcodegen recomputes it.
 // qrcodegen stores the generator polynomial highest-to-lowest excluding the
-// monic leading term; the old hand-rolled reedSolomon stored it reversed,
-// causing a coefficient-order mismatch that corrupted every ECC payload.
+// monic leading term. We cache the divisor for each ECC length to avoid recomputing it.
 
 const _rsDivisorCache = new Map();
 
@@ -302,19 +301,42 @@ function buildBlockLayout(version, eccLevel) {
     };
 }
 
-// Compute GJ-accessible ECC capacity: each block contributes min(freeBytes, eccPerBlock).
-// A block with fewer free bytes than eccPerBlock contributes a partial slice —
-// the GJ solver uses all available pivots before running out.
+// Compute contiguous GJ-accessible capacity at the end of the deinterleaved
+// block-order ECC string. This supports the public decode rule:
+// final byte = length, preceding length bytes is the reversed secret.
+// filling the ECC from the end allows a contiguous block of free bits to be used for the secret.
 function calcEccCapacity(dataBlockLens, lockBytes, eccPerBlock) {
     let total = 0;
     let seqOffset = 0;
+    const perBlock = [];
     for (const blkLen of dataBlockLens) {
         const lockInBlock = Math.max(0, Math.min(lockBytes - seqOffset, blkLen));
         const freeInBlock = blkLen - lockInBlock;
-        total += Math.min(freeInBlock, eccPerBlock);
+        perBlock.push(Math.min(freeInBlock, eccPerBlock));
         seqOffset += blkLen;
     }
+    for (let i = perBlock.length - 1; i >= 0; i--) {
+        total += perBlock[i];
+        if (perBlock[i] < eccPerBlock) break;
+    }
     return total;
+}
+
+function buildEccPayloadPlan(dataBlockLens, lockBytes, eccPerBlock) {
+    let seqOffset = 0;
+    return dataBlockLens.map((blkLen, blockIndex) => {
+        const start = seqOffset;
+        const lockInBlock = Math.max(0, Math.min(lockBytes - start, blkLen));
+        const freeInBlock = blkLen - lockInBlock;
+        seqOffset += blkLen;
+        return {
+            blockIndex,
+            start,
+            length: blkLen,
+            lockBytesInBlock: lockInBlock,
+            payloadBytes: Math.min(freeInBlock, eccPerBlock)
+        };
+    });
 }
 
 function buildFunctionModules(version) {
@@ -426,7 +448,7 @@ function pickVersion(decoy, paddingSecret, eccSecret, eccLevel, maxVersion = 10)
 
             const lockBytes = padInfo.padStart / 8 + (padSecretBytes.length > 0 ? 1 + padSecretBytes.length : 0);
             const eccCap = calcEccCapacity(blockInfo.dataBlockLens, lockBytes, blockInfo.eccPerBlock);
-            if (eccSecretBytes.length + 1 > eccCap) continue; // +1 for length prefix
+            if (eccSecretBytes.length + 1 > eccCap) continue; // +1 for length suffix
 
             return { version: v, padCapacity: padInfo.padBytesCapacity, eccCapacity: eccCap };
         } catch (e) {
@@ -450,9 +472,9 @@ const QRStego = {
             decoy = '',
             paddingSecret = '',
             eccSecret = '',
-            version = 5,
-            eccLevel = 'H',
-            mask = 0,
+            version = 1,
+            eccLevel = 'M',
+            mask = -1,
             autoVersion = false,
             maxVersion = 10
         } = options;
@@ -497,49 +519,48 @@ const QRStego = {
 
         if (eccSecret && eccSecret.length > 0) {
             const eccSecretBytes = utf8Bytes(eccSecret);
-            // +1 for the length prefix byte (same pattern as padding secret)
+            // +1 for the trailing length byte.
             if (eccSecretBytes.length + 1 > eccCap) {
                 throw new Error(
-                    `ECC secret too long: need ${eccSecretBytes.length + 1} bytes (including 1-byte length prefix), ` +
+                    `ECC secret too long: need ${eccSecretBytes.length + 1} bytes (including 1-byte length suffix), ` +
                     `have ${eccCap} bytes capacity (${blockInfo.totalBlocks} block(s) × ${blockInfo.eccPerBlock} ECC bytes).`
                 );
             }
 
-            // Length-prefixed payload: [len, s0, s1, ..., sN]
-            // The prefix lets the decoder know exactly how many bytes to read,
-            // so unused ECC bytes can stay at their natural RS values.
-            const eccPayload = new Uint8Array([eccSecretBytes.length, ...eccSecretBytes]);
+            // Suffix payload over the deinterleaved ECC block-order string:
+            // [...reversed(secret bytes), len]. This lets solvers read the final
+            // ECC byte as a length, then reverse the preceding bytes.
+            const eccPayload = new Uint8Array([...Array.from(eccSecretBytes).reverse(), eccSecretBytes.length]);
 
-            let seqOffset = 0;
             let secretOffset = 0;
-            const solvedBlocks = [];
+            const solvedBlocks = new Array(blockInfo.dataBlockLens.length);
+            const payloadPlan = buildEccPayloadPlan(
+                blockInfo.dataBlockLens,
+                lockBytes,
+                blockInfo.eccPerBlock
+            );
 
-            for (const blkLen of blockInfo.dataBlockLens) {
-                const seqOffsetBefore = seqOffset;
-                seqOffset += blkLen;
-                const blkData = dataCodewords.slice(seqOffsetBefore, seqOffsetBefore + blkLen);
-                const lockBytesInBlock = Math.max(0, Math.min(lockBytes - seqOffsetBefore, blkLen));
-                const freeBytesInBlock = blkLen - lockBytesInBlock;
-                const blockEccBytes = Math.min(freeBytesInBlock, blockInfo.eccPerBlock);
+            for (let planIdx = payloadPlan.length - 1; planIdx >= 0; planIdx--) {
+                const blockPlan = payloadPlan[planIdx];
+                const blkData = dataCodewords.slice(blockPlan.start, blockPlan.start + blockPlan.length);
 
-                // Drive only the payload bytes that land in this block.
-                // Leaving the rest untouched means they stay at their natural RS
-                // values (pseudo-random), so unused ECC bytes never appear zeroed out.
-                const payloadInBlock = Math.min(blockEccBytes, eccPayload.length - secretOffset);
+                const payloadInBlock = Math.min(blockPlan.payloadBytes, eccPayload.length - secretOffset);
 
                 if (payloadInBlock > 0) {
                     const gj = new GJBlock(blkData, blockInfo.eccPerBlock);
 
-                    for (let bit = 0; bit < lockBytesInBlock * 8; bit++) {
+                    for (let bit = 0; bit < blockPlan.lockBytesInBlock * 8; bit++) {
                         gj.lockBit(bit);
                     }
 
                     let failures = 0;
+                    const eccStart = blockInfo.eccPerBlock - payloadInBlock;
+                    const payloadStart = eccPayload.length - secretOffset - payloadInBlock;
                     for (let byteIdx = 0; byteIdx < payloadInBlock; byteIdx++) {
-                        const payloadByte = eccPayload[secretOffset + byteIdx];
+                        const payloadByte = eccPayload[payloadStart + byteIdx];
                         for (let bitIdx = 0; bitIdx < 8; bitIdx++) {
                             const target = (payloadByte >> (7 - bitIdx)) & 1;
-                            if (!gj.setEccBit(byteIdx, bitIdx, target)) failures++;
+                            if (!gj.setEccBit(eccStart + byteIdx, bitIdx, target)) failures++;
                         }
                     }
                     if (failures > 0) {
@@ -547,16 +568,17 @@ const QRStego = {
                     }
                     secretOffset += payloadInBlock;
 
-                    solvedBlocks.push(gj.dataBytes);
+                    solvedBlocks[blockPlan.blockIndex] = gj.dataBytes;
                 } else {
-                    solvedBlocks.push(blkData);
+                    solvedBlocks[blockPlan.blockIndex] = blkData;
                 }
             }
 
             dataCodewords = solvedBlocks.flat();
         }
 
-        // qrcodegen recomputes ECC from the solved data bytes
+        // qrcodegen recomputes ECC from the solved data bytes.
+        // mask -1 tells qrcodegen to auto-pick the mask with the lowest penalty score.
         const qr = new qrcodegen.QrCode(chosenVersion, ecc, dataCodewords, mask);
         const canvas = drawModules(qr.modules);
 
@@ -565,7 +587,8 @@ const QRStego = {
             dataUrl: canvas.toDataURL('image/png'),
             padCapacity: dataBuild.padBytesCapacity,
             eccCapacity: eccCap,
-            version: chosenVersion
+            version: chosenVersion,
+            mask: qr.mask
         };
     },
 
@@ -631,58 +654,17 @@ const QRStego = {
 
         if (extractECC && qrData.eccCodewords && qrData.eccCodewords.length > 0) {
             try {
-                // Reconstruct the ECC payload block-by-block, mirroring the encoder:
-                // only take blockEccBytes = min(freeInBlock, eccPerBlock) bytes from
-                // each block's ECC section. This handles the case where block 0 is
-                // fully or partially locked (long decoy or padding secret) so the
-                // payload starts mid-stream rather than at eccCodewords[0].
-                const blockInfo = computeBlockInfo(qrData.version, qrData.eccLevel);
-                const dataBytes = qrData.dataCodewords;
-
-                // Determine decoy byte length from the QR header
-                const ccBits = byteModeCharCountBits(qrData.version);
-                let decoyLen = 0;
-                for (let i = 0; i < ccBits; i++) {
-                    const bitPos = 4 + i;
-                    decoyLen = (decoyLen << 1) | ((dataBytes[bitPos >> 3] >> (7 - (bitPos & 7))) & 1);
-                }
-
-                const padInfo = calcPadCapacity(decoyLen, qrData.version, blockInfo.dataCodewords);
-                const padByteStart = padInfo.padStart / 8;
-
-                // Detect padding secret length (same heuristic as encoder uses to set lock_bytes)
-                let padSecretLen = 0;
-                if (padByteStart < dataBytes.length) {
-                    const lenByte = dataBytes[padByteStart];
-                    if (lenByte !== 0xEC && lenByte !== 0x11 &&
-                        lenByte > 0 && lenByte + 1 <= padInfo.padBytesCapacity) {
-                        padSecretLen = lenByte;
-                    }
-                }
-
-                const lockBytes = padByteStart + (padSecretLen > 0 ? 1 + padSecretLen : 0);
-
-                // Collect payload bytes: take only driven ECC bytes from each block
                 const eccCodewords = qrData.eccCodewords;
-                const payload = [];
-                let eccOffset = 0;
-                let seqOffset = 0;
-                for (const blkLen of blockInfo.dataBlockLens) {
-                    const lockInBlock = Math.max(0, Math.min(lockBytes - seqOffset, blkLen));
-                    const freeInBlock = blkLen - lockInBlock;
-                    const blockEccBytes = Math.min(freeInBlock, blockInfo.eccPerBlock);
-                    for (let i = 0; i < blockEccBytes; i++) {
-                        payload.push(eccCodewords[eccOffset + i]);
-                    }
-                    eccOffset += blockInfo.eccPerBlock;
-                    seqOffset += blkLen;
-                }
-
-                const secretLen = payload[0];
-                if (secretLen > 0 && 1 + secretLen <= payload.length) {
+                // Suffix format over deinterleaved ECC bytes in block order:
+                // final byte = length; previous length bytes = reversed secret.
+                const secretLen = eccCodewords[eccCodewords.length - 1];
+                if (secretLen > 0 && 1 + secretLen <= eccCodewords.length) {
                     try {
+                        const reversedSecret = eccCodewords
+                            .slice(eccCodewords.length - 1 - secretLen, eccCodewords.length - 1)
+                            .reverse();
                         const decoded = new TextDecoder('utf-8', { fatal: true }).decode(
-                            new Uint8Array(payload.slice(1, 1 + secretLen))
+                            new Uint8Array(reversedSecret)
                         );
                         const isPrintable = [...decoded].every(ch => {
                             const cp = ch.codePointAt(0);

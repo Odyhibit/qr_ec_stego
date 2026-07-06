@@ -33,14 +33,13 @@ function setStegoMode(mode) {
         `flex-1 py-2 text-center transition ${isPadding ? 'bg-accent-primary text-white' : 'bg-dark-elevated text-dark-muted'}`;
     document.getElementById('mode-ecc-btn').className =
         `flex-1 py-2 text-center transition ${!isPadding ? 'bg-accent-secondary text-white' : 'bg-dark-elevated text-dark-muted'}`;
-    document.getElementById('mode-padding-input').classList.toggle('hidden', !isPadding);
-    document.getElementById('mode-ecc-input').classList.toggle('hidden', isPadding);
-    // Clear the inactive field so it does not accidentally influence encoding
-    if (isPadding) {
-        document.getElementById('encode-ecc').value = '';
-    } else {
-        document.getElementById('encode-padding').value = '';
-    }
+    document.getElementById('secret-label').textContent = isPadding ? 'Padding Secret' : 'ECC Secret';
+    document.getElementById('secret-hint').textContent = isPadding
+        ? '(hidden in unused data codewords)'
+        : '(hidden in error-correction bytes via GJ solver)';
+    document.getElementById('encode-secret').placeholder = isPadding
+        ? 'Secret hidden in padding bytes'
+        : 'Secret hidden in ECC bytes';
 }
 
 // Tab switching
@@ -89,9 +88,8 @@ function setupDecodeUpload() {
 
 // Pre-fill encode inputs with a quick demo message
 function setupEncodeDefaults() {
-    document.getElementById('encode-decoy').value = 'SCAN ME!';
-    document.getElementById('encode-padding').value = 'padding secret';
-    document.getElementById('encode-ecc').value = '';
+    document.getElementById('encode-decoy').value = 'Scan Me!';
+    document.getElementById('encode-secret').value = 'secret';
     setStegoMode('padding');
 }
 
@@ -128,9 +126,10 @@ async function loadExample(example) {
 // Generate stego QR in-browser using GJ-based ECC payload approach
 async function generateStego() {
     const decoy = document.getElementById('encode-decoy').value || '';
-    // Only the active mode contributes a secret; the other field is cleared by setStegoMode
-    const paddingSecret = stegoMode === 'padding' ? (document.getElementById('encode-padding').value || '') : '';
-    const eccSecret = stegoMode === 'ecc' ? (document.getElementById('encode-ecc').value || '') : '';
+    const secret = document.getElementById('encode-secret').value || '';
+    // Padding and ECC secrets are mutually exclusive, so one field feeds whichever is active.
+    const paddingSecret = stegoMode === 'padding' ? secret : '';
+    const eccSecret = stegoMode === 'ecc' ? secret : '';
     const version = parseInt(document.getElementById('encode-version').value, 10);
     const eccLevel = document.getElementById('encode-ecc-level').value;
     const mask = parseInt(document.getElementById('encode-mask').value, 10);
@@ -159,6 +158,7 @@ async function generateStego() {
         document.getElementById('encode-pad-cap').innerText = `${encodeResult.padCapacity} bytes`;
         document.getElementById('encode-ecc-cap').innerText = `${encodeResult.eccCapacity} bytes`;
         document.getElementById('encode-meta-version').innerText = encodeResult.version;
+        document.getElementById('encode-meta-mask').innerText = encodeResult.mask;
         document.getElementById('encode-download').disabled = false;
         showNotification('Stego QR generated. Scan shows the decoy message.', 'success');
     } catch (error) {
