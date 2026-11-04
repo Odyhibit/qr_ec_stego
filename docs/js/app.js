@@ -44,6 +44,7 @@ function setStegoMode(mode) {
 
 // Tab switching
 function switchTab(tabName) {
+    if (tabName !== 'decode' && typeof stopDecodeCamera === 'function') stopDecodeCamera();
     document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
     document.querySelectorAll('.tab-button').forEach(el => {
         el.classList.remove('active');
@@ -100,6 +101,7 @@ function handleDecodeFile(file) {
         const img = new Image();
         img.onload = () => {
             decodeImageData = { img, file };
+            document.getElementById('decode-image-label').textContent = 'Uploaded Image:';
             document.getElementById('decode-image').src = e.target.result;
             document.getElementById('decode-preview').classList.remove('hidden');
             document.getElementById('decode-btn').disabled = false;
@@ -107,6 +109,93 @@ function handleDecodeFile(file) {
         img.src = e.target.result;
     };
     reader.readAsDataURL(file);
+}
+
+// ── Optional live camera scan (decode tab) ───────────────────────────────────
+// Detects the QR + its corners in each frame, rectifies it into a clean module
+// image (see camera-scan.js), then runs the normal decoder on that image.
+
+let cameraStream = null;
+
+function setCameraStatus(text, kind = 'info') {
+    const el = document.getElementById('camera-status');
+    el.textContent = text;
+    el.className = 'text-sm ' + (kind === 'ok' ? 'text-accent-success'
+        : kind === 'warn' ? 'text-yellow-400' : 'text-dark-muted');
+}
+
+async function startDecodeCamera() {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        showNotification('Camera not available. It requires HTTPS (or localhost) and a supported browser.', 'error', 6000);
+        return;
+    }
+    if (typeof jsQR === 'undefined') {
+        showNotification('QR detection library failed to load (jsQR). Check your connection.', 'error', 6000);
+        return;
+    }
+    try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: {
+                facingMode: { ideal: 'environment' },
+                width: { ideal: 1920 },
+                height: { ideal: 1080 }
+            },
+            audio: false
+        });
+    } catch (error) {
+        cameraStream = null;
+        const denied = error.name === 'NotAllowedError' || error.name === 'SecurityError';
+        showNotification(
+            denied ? 'Camera permission denied. Allow camera access and try again.'
+                   : 'Could not start camera: ' + error.message,
+            'error', 6000);
+        console.error(error);
+        return;
+    }
+
+    const video = document.getElementById('camera-video');
+    video.srcObject = cameraStream;
+    document.getElementById('camera-panel').classList.remove('hidden');
+    document.getElementById('camera-start-btn').classList.add('hidden');
+    setCameraStatus('Point the camera at a QR code…');
+    try { await video.play(); } catch (e) { /* autoplay attr covers it */ }
+
+    QRCameraScanner.start({
+        video,
+        overlay: document.getElementById('camera-overlay'),
+        onStatus: setCameraStatus,
+        onResult: ({ canvas, decoy, version, approximate }) => {
+            stopDecodeCamera();
+            const dataUrl = canvas.toDataURL('image/png');
+            const img = new Image();
+            img.onload = () => {
+                decodeImageData = { img, file: null };
+                document.getElementById('decode-image').src = dataUrl;
+                document.getElementById('decode-image-label').textContent = 'Rectified from camera:';
+                document.getElementById('decode-preview').classList.remove('hidden');
+                document.getElementById('decode-btn').disabled = false;
+                if (approximate) {
+                    showNotification('Frames never fully agreed; used a majority vote. If the secret looks wrong, rescan.', 'warning', 6000);
+                }
+                decodeQR();
+            };
+            img.src = dataUrl;
+        }
+    });
+}
+
+function stopDecodeCamera() {
+    QRCameraScanner.stop();
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+    }
+    const video = document.getElementById('camera-video');
+    video.srcObject = null;
+    const overlay = document.getElementById('camera-overlay');
+    overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
+    document.getElementById('camera-panel').classList.add('hidden');
+    document.getElementById('camera-start-btn').classList.remove('hidden');
 }
 
 // Load example QR codes
@@ -258,7 +347,7 @@ function displayDecodeResults(result) {
 function exportDecodeReport() {
     const report = {
         timestamp: new Date().toISOString(),
-        filename: decodeImageData.file.name,
+        filename: decodeImageData.file ? decodeImageData.file.name : 'camera-capture.png',
         results: document.getElementById('decode-results').innerText
     };
 
