@@ -13,8 +13,7 @@ Hide secret messages in QR codes using padding bytes and error correction codes.
 
 ### Web Tool (Try it now!)
 
-Visit the web interface: [Live Demo](https://joshpbloom.github.io/qr_ec_stego/) 
-
+Visit the web interface: [Live Demo](https://odyhibit.github.io/qr_ec_stego/)
 
 
 
